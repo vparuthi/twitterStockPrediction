@@ -9,9 +9,13 @@ from google.cloud.language import enums
 from google.cloud.language import types
 import os
 import matplotlib.pyplot as plt
+from matplotlib import style
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, LSTM
+import pickle
+pd.options.mode.chained_assignment = None  # default='warn'
+style.use('ggplot')
 
 
 consumer_key = 'nHv8Cx32VE2rXLhskSmR9JwDC'
@@ -76,6 +80,7 @@ def print_result(annotations):
 
 ## MAIN ##
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/Veraj/PycharmProjects/twitterSideProject/googleAPICredentials.json'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 text = "There is one kind of food I cannot stand: sashimi. Sashimi is raw fish. Many people like it. They love it in Japan, but I cannot even look at without feeling sick. First of all, it looks like it has not been cooked and that makes me think it might not be clean."
 
 # screen_name = input("Enter the twitter handle of the person whose tweets you want to download: ")
@@ -97,7 +102,7 @@ df = df[['Date', 'Adj. Close']]
 df.dropna(axis=0, inplace=True)
 df.index = df.Date
 df.drop('Date', axis=1, inplace=True)
-
+print(len(df))
 train_size = 0.8
 train = df[:int(len(df)*train_size)]
 test = df[int(len(df)*train_size):]
@@ -112,6 +117,40 @@ for i in range(60,len(train)):
     y_train.append(scaled_data[i,0])
 
 x_train, y_train = np.array(x_train), np.array(y_train)
-print(x_train[0])
 x_train = np.reshape(x_train, (x_train.shape[0],x_train.shape[1],1))
-print(x_train[0])
+
+# model = Sequential()
+# model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 1)))
+# model.add(LSTM(units=50))
+# model.add(Dense(1))
+print("fitted")
+
+# model.compile(loss='mean_squared_error', optimizer='adam')
+# model.fit(x_train, y_train, epochs=1, batch_size=1, verbose=2)
+# with open('LSDM_pickle.pkl', 'wb') as file:
+#     pickle.dump(model, file)
+
+pickle_in = open('LSDM_pickle.pkl', 'rb')
+model = pickle.load(pickle_in)
+
+inputs = df[len(df) - len(test) - 60:].values
+inputs = inputs.reshape(-1,1)
+inputs = scaler.transform(inputs)
+
+X_test = []
+for i in range(60,inputs.shape[0]):
+    X_test.append(inputs[i-60:i,0])
+X_test = np.array(X_test)
+
+X_test = np.reshape(X_test, (X_test.shape[0],X_test.shape[1],1))
+closing_price = model.predict(X_test)
+closing_price = scaler.inverse_transform(closing_price)
+# print(closing_price)
+
+# rms=np.sqrt(np.mean(np.power((train-closing_price),2)))
+# print(rms)
+test['Predictions'] = closing_price
+plt.plot(train['Adj. Close'])
+plt.plot(test[['Adj. Close', 'Predictions']])
+plt.show()
+print("done")
