@@ -9,6 +9,9 @@ from google.cloud.language import enums
 from google.cloud.language import types
 import os
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, LSTM
 
 
 consumer_key = 'nHv8Cx32VE2rXLhskSmR9JwDC'
@@ -91,14 +94,24 @@ screen_name = 'realDonaldTrump'
 
 df = pd.read_csv('googleStock.csv')
 df = df[['Date', 'Adj. Close']]
-df.dropna(axis=1, inplace=True)
+df.dropna(axis=0, inplace=True)
+df.index = df.Date
+df.drop('Date', axis=1, inplace=True)
 
 train_size = 0.8
 train = df[:int(len(df)*train_size)]
 test = df[int(len(df)*train_size):]
-print(test)
 
+#converting dataset into x_train and y_train
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaled_data = scaler.fit_transform(df)
 
-# df['Adj. Close'].plot()
-# plt.show()
-# print(df.iloc[[1]])
+x_train, y_train = [], []
+for i in range(60,len(train)):
+    x_train.append(scaled_data[i-60:i,0])
+    y_train.append(scaled_data[i,0])
+
+x_train, y_train = np.array(x_train), np.array(y_train)
+print(x_train[0])
+x_train = np.reshape(x_train, (x_train.shape[0],x_train.shape[1],1))
+print(x_train[0])
