@@ -1,7 +1,9 @@
 import csv
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import quandl as quandl
+
 quandl.ApiConfig.api_key = "y94CFqx58gLCyaY9hsRf"
 import tweepy
 from google.cloud import language
@@ -12,8 +14,8 @@ import matplotlib.pyplot as plt
 from matplotlib import style
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
-from keras.layers import Dense, Dropout, LSTM
-import pickle
+from keras.layers import Dense, LSTM
+
 pd.options.mode.chained_assignment = None  # default='warn'
 style.use('ggplot')
 
@@ -96,13 +98,16 @@ screen_name = 'realDonaldTrump'
 #creating the dataframe
 # df = quandl.get('WIKI/GOOGL')
 # df.to_csv('googleStock.csv')
-
 df = pd.read_csv('googleStock.csv')
-df = df[['Date', 'Adj. Close']]
+number_col = 2
+# df = df[['Date', 'Adj. Close']]
+df['HL_PCT'] = (df["Adj. High"] - df["Adj. Low"]) / df["Adj. Low"]*100
+df = df[['Date', 'Adj. Close', 'HL_PCT']]
+
 df.dropna(axis=0, inplace=True)
 df.index = df.Date
 df.drop('Date', axis=1, inplace=True)
-print(len(df))
+print(df.tail())
 train_size = 0.8
 train = df[:int(len(df)*train_size)]
 test = df[int(len(df)*train_size):]
@@ -113,43 +118,38 @@ scaled_data = scaler.fit_transform(df)
 
 x_train, y_train = [], []
 for i in range(60,len(train)):
-    x_train.append(scaled_data[i-60:i,0])
-    y_train.append(scaled_data[i,0])
+    x_train.append(scaled_data[i-60:i])
+    y_train.append(scaled_data[i])
 
 x_train, y_train = np.array(x_train), np.array(y_train)
-x_train = np.reshape(x_train, (x_train.shape[0],x_train.shape[1],1))
+x_train = np.reshape(x_train, (x_train.shape[0],x_train.shape[1],number_col))
 
-# model = Sequential()
-# model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 1)))
-# model.add(LSTM(units=50))
-# model.add(Dense(1))
-print("fitted")
+model = Sequential()
+model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], number_col)))
+model.add(LSTM(units=50))
+model.add(Dense(2))
+model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
+model.fit(x_train, y_train, epochs=1, batch_size=1, verbose=2)
+model.save("LSTM_model")
 
-# model.compile(loss='mean_squared_error', optimizer='adam')
-# model.fit(x_train, y_train, epochs=1, batch_size=1, verbose=2)
-# with open('LSDM_pickle.pkl', 'wb') as file:
-#     pickle.dump(model, file)
-
-pickle_in = open('LSDM_pickle.pkl', 'rb')
-model = pickle.load(pickle_in)
 
 inputs = df[len(df) - len(test) - 60:].values
-inputs = inputs.reshape(-1,1)
+inputs = inputs.reshape(-1, number_col)
 inputs = scaler.transform(inputs)
 
 X_test = []
 for i in range(60,inputs.shape[0]):
-    X_test.append(inputs[i-60:i,0])
+    X_test.append(inputs[i-60:i])
 X_test = np.array(X_test)
 
-X_test = np.reshape(X_test, (X_test.shape[0],X_test.shape[1],1))
+X_test = np.reshape(X_test, (X_test.shape[0],X_test.shape[1],number_col))
 closing_price = model.predict(X_test)
 closing_price = scaler.inverse_transform(closing_price)
 # print(closing_price)
 
 # rms=np.sqrt(np.mean(np.power((train-closing_price),2)))
 # print(rms)
-test['Predictions'] = closing_price
+test['Predictions'] = closing_price[:,0]
 plt.plot(train['Adj. Close'])
 plt.plot(test[['Adj. Close', 'Predictions']])
 plt.show()
