@@ -3,6 +3,7 @@ import csv
 import numpy as np
 import pandas as pd
 import quandl as quandl
+from keras.engine.saving import load_model
 
 quandl.ApiConfig.api_key = "y94CFqx58gLCyaY9hsRf"
 import tweepy
@@ -79,6 +80,32 @@ def print_result(annotations):
     print('Overall Sentiment: score of {} with magnitude of {}'.format(
         score, magnitude))
     return 0
+def create_df_csv(ticker):
+    df = quandl.get('WIKI/'+ticker)
+    df.to_csv(ticker + 'Stock.csv')
+    df.dropna(axis=0, inplace=True)
+    df['HL_PCT'] = (df["Adj. High"] - df["Adj. Low"]) / df["Adj. Low"] * 100
+    df['PCT_Change'] = (df["Adj. Close"] - df["Adj. Open"]) / df["Adj. Open"] * 100
+    if 'Date' in df.columns:
+        df = df[['Date', 'Adj. Close', 'HL_PCT', 'PCT_Change']]
+        df.index = df.Date
+        df.drop('Date', axis=1, inplace=True)
+    else:
+        df = df[['Adj. Close', 'HL_PCT', 'PCT_Change']]
+    return df
+
+def read_df_csv(ticker):
+    return pd.read_csv(ticker+'Stock.csv')
+
+def create_model(X_train, y_train, number_col):
+    model = Sequential()
+    model.add(LSTM(units=50, return_sequences=True, input_shape=(X_train.shape[1], number_col), activation='relu'))
+    model.add(LSTM(units=50, activation='relu'))
+    model.add(Dense(number_col))
+    model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
+    model.fit(X_train, y_train, epochs=1, batch_size=1, verbose=2)
+    model.save("LSTM_model")
+    return model
 
 ## MAIN ##
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/Veraj/PycharmProjects/twitterSideProject/googleAPICredentials.json'
@@ -95,20 +122,12 @@ screen_name = 'realDonaldTrump'
 # sentiment, entities = language_analysis(text)
 # print_result(sentiment)
 
-#creating the dataframe
-# df = quandl.get('WIKI/GOOGL')
-# df.to_csv('googleStock.csv')
-df = pd.read_csv('googleStock.csv')
-number_col = 2
-# df = df[['Date', 'Adj. Close']]
-df['HL_PCT'] = (df["Adj. High"] - df["Adj. Low"]) / df["Adj. Low"]*100
-df = df[['Date', 'Adj. Close', 'HL_PCT']]
+number_col = 3
+train_size = 0.7
+ticker = 'AAPL'
+df = create_df_csv(ticker)
+# df = read_df_csv(ticker)
 
-df.dropna(axis=0, inplace=True)
-df.index = df.Date
-df.drop('Date', axis=1, inplace=True)
-print(df.tail())
-train_size = 0.8
 train = df[:int(len(df)*train_size)]
 test = df[int(len(df)*train_size):]
 
@@ -116,41 +135,37 @@ test = df[int(len(df)*train_size):]
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(df)
 
-x_train, y_train = [], []
+X_train, y_train = [], []
 for i in range(60,len(train)):
-    x_train.append(scaled_data[i-60:i])
+    X_train.append(scaled_data[i - 60:i])
     y_train.append(scaled_data[i])
 
-x_train, y_train = np.array(x_train), np.array(y_train)
-x_train = np.reshape(x_train, (x_train.shape[0],x_train.shape[1],number_col))
+X_train, y_train = np.array(X_train), np.array(y_train)
+X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], number_col))
 
-model = Sequential()
-model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], number_col)))
-model.add(LSTM(units=50))
-model.add(Dense(2))
-model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
-model.fit(x_train, y_train, epochs=1, batch_size=1, verbose=2)
-model.save("LSTM_model")
+# model = create_model(X_train, y_train, number_col)
+model = load_model('LSTM_model')
 
-
+inputs_df = df[len(df) - len(test) - 60:]
 inputs = df[len(df) - len(test) - 60:].values
 inputs = inputs.reshape(-1, number_col)
 inputs = scaler.transform(inputs)
 
-X_test = []
+X_test, y_test = [], []
 for i in range(60,inputs.shape[0]):
     X_test.append(inputs[i-60:i])
-X_test = np.array(X_test)
+    y_test.append(inputs[i])
+
+X_test, y_test = np.array(X_test), np.array(y_test)
 
 X_test = np.reshape(X_test, (X_test.shape[0],X_test.shape[1],number_col))
 closing_price = model.predict(X_test)
 closing_price = scaler.inverse_transform(closing_price)
-# print(closing_price)
+val_loss, val_acc = model.evaluate(X_test,y_test)
+print(val_loss, val_acc)
 
-# rms=np.sqrt(np.mean(np.power((train-closing_price),2)))
-# print(rms)
 test['Predictions'] = closing_price[:,0]
 plt.plot(train['Adj. Close'])
 plt.plot(test[['Adj. Close', 'Predictions']])
-plt.show()
 print("done")
+plt.show()
