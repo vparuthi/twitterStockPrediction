@@ -11,6 +11,7 @@ from google.cloud import language
 from google.cloud.language import enums
 from google.cloud.language import types
 import os
+import os.path
 import matplotlib.pyplot as plt
 from matplotlib import style
 from sklearn.preprocessing import MinMaxScaler
@@ -19,7 +20,6 @@ from keras.layers import Dense, LSTM
 
 pd.options.mode.chained_assignment = None  # default='warn'
 style.use('ggplot')
-
 
 consumer_key = 'nHv8Cx32VE2rXLhskSmR9JwDC'
 consumer_secret = '7pKXbHO1mxIy87qPn85CKkiTziwMsddbo9mu4aW7EBJ3kgUHvV'
@@ -30,12 +30,13 @@ auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
 auth.set_access_token(access_token, access_secret)
 api = tweepy.API(auth)
 
+
 def get_all_tweets(screen_name):
     all_the_tweets = []
     new_tweets = api.user_timeline(screen_name=screen_name, count=200, include_rts=False)
     all_the_tweets.extend(new_tweets)
-    oldest_tweet = all_the_tweets[-1].id-1
-    while(len(new_tweets)>0):
+    oldest_tweet = all_the_tweets[-1].id - 1
+    while (len(new_tweets) > 0):
         # The max_id param will be used subsequently to prevent duplicates
         new_tweets = api.user_timeline(screen_name=screen_name,
                                        count=200, max_id=oldest_tweet, include_rts=False)
@@ -59,6 +60,7 @@ def get_all_tweets(screen_name):
         writer.writerows(outtweets)
     print('All Tweets Downloaded!')
 
+
 def language_analysis(text):
     client = language.LanguageServiceClient()
     document = types.Document(content=text, type=enums.Document.Type.PLAIN_TEXT)
@@ -67,6 +69,7 @@ def language_analysis(text):
     entity_sent_analysis = client.analyze_entity_sentiment(document=document)
 
     return sent_analysis, entity_sent_analysis
+
 
 def print_result(annotations):
     score = annotations.document_sentiment.score
@@ -80,9 +83,10 @@ def print_result(annotations):
     print('Overall Sentiment: score of {} with magnitude of {}'.format(
         score, magnitude))
     return 0
+
+
 def create_df_csv(ticker):
-    df = quandl.get('WIKI/'+ticker)
-    df.to_csv(ticker + 'Stock.csv')
+    df = quandl.get('WIKI/' + ticker)
     df.dropna(axis=0, inplace=True)
     df['HL_PCT'] = (df["Adj. High"] - df["Adj. Low"]) / df["Adj. Low"] * 100
     df['PCT_Change'] = (df["Adj. Close"] - df["Adj. Open"]) / df["Adj. Open"] * 100
@@ -92,23 +96,78 @@ def create_df_csv(ticker):
         df.drop('Date', axis=1, inplace=True)
     else:
         df = df[['Adj. Close', 'HL_PCT', 'PCT_Change']]
+    df.to_csv(ticker + 'Stock.csv')
     return df
 
+
 def read_df_csv(ticker):
-    return pd.read_csv(ticker+'Stock.csv')
+    df = pd.read_csv(ticker + 'Stock.csv')
+    if 'Date' in df.columns:
+        df = df[['Date', 'Adj. Close', 'HL_PCT', 'PCT_Change']]
+        df.index = df.Date
+        df.drop('Date', axis=1, inplace=True)
+    else:
+        df = df[['Adj. Close', 'HL_PCT', 'PCT_Change']]
+    return df
+
 
 def create_model(X_train, y_train, number_col):
-    model = Sequential()
-    model.add(LSTM(units=50, return_sequences=True, input_shape=(X_train.shape[1], number_col), activation='relu'))
-    model.add(LSTM(units=50, activation='relu'))
-    model.add(Dense(number_col))
-    model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
-    model.fit(X_train, y_train, epochs=1, batch_size=1, verbose=2)
-    model.save("LSTM_model")
+    if os.path.isfile('LSTM_model_multi_stock'):
+        model = load_model('LSTM_model_multi_stock')
+        model.fit(X_train, y_train, epochs=2, batch_size=1, verbose=2)
+        model.save("LSTM_model_multi_stock")
+    else:
+        model = Sequential()
+        model.add(LSTM(units=50, return_sequences=True, input_shape=(X_train.shape[1], number_col)))
+        model.add(LSTM(units=50))
+        model.add(Dense(128))
+        model.add(Dense(number_col))
+        model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
+        model.fit(X_train, y_train, epochs=2, batch_size=1, verbose=2)
+        model.save("LSTM_model_multi_stock")
     return model
 
+
+def test_model(model, df, test, number_col):
+    inputs = df[len(df) - len(test) - 60:].values
+    inputs = inputs.reshape(-1, number_col)
+    inputs = scaler.transform(inputs)
+
+    X_test, y_test = [], []
+    for i in range(60, inputs.shape[0]):
+        X_test.append(inputs[i - 60:i])
+        y_test.append(inputs[i])
+
+    X_test, y_test = np.array(X_test), np.array(y_test)
+    X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], number_col))
+
+    closing_price = model.predict(X_test)
+    closing_price = scaler.inverse_transform(closing_price)
+    val_loss, val_acc = model.evaluate(X_test, y_test)
+    print(val_loss, val_acc)
+    return closing_price
+
+
+def predict_data(model, scaled_data, n):
+    for i in range(n):
+        predict_sample = []
+        for j in range(n, 60 + n):
+            predict_sample.append(scaled_data[j])
+
+        predict_sample = np.array(predict_sample)
+        predict_sample = np.reshape(predict_sample, (1, predict_sample.shape[0], predict_sample.shape[1]))
+        closing_price = model.predict(predict_sample)
+        closing_price = scaler.inverse_transform(closing_price)
+        scaled_data = np.insert(arr=scaled_data, obj=scaled_data.shape[0] - 1,
+                                values=scaler.fit_transform(closing_price), axis=0)
+        print(closing_price)
+        plt.scatter(test.index.values[test.shape[0] - 1] + np.timedelta64(i + 1, 'D'), closing_price[0][0], s=100)
+    return plt, scaled_data
+
+
 ## MAIN ##
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/Veraj/PycharmProjects/twitterSideProject/googleAPICredentials.json'
+os.environ[
+    'GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/Veraj/PycharmProjects/twitterSideProject/googleAPICredentials.json'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 text = "There is one kind of food I cannot stand: sashimi. Sashimi is raw fish. Many people like it. They love it in Japan, but I cannot even look at without feeling sick. First of all, it looks like it has not been cooked and that makes me think it might not be clean."
 
@@ -123,49 +182,38 @@ screen_name = 'realDonaldTrump'
 # print_result(sentiment)
 
 number_col = 3
-train_size = 0.7
+train_size = 0.8
 ticker = 'AAPL'
-df = create_df_csv(ticker)
-# df = read_df_csv(ticker)
+ticker_list = []
+# for ticker in ticker_list:
+#     df = create_df_csv(ticker)
 
-train = df[:int(len(df)*train_size)]
-test = df[int(len(df)*train_size):]
+for ticker in ticker_list:
+    df = create_df_csv(ticker)
 
-#converting dataset into x_train and y_train
-scaler = MinMaxScaler(feature_range=(0, 1))
-scaled_data = scaler.fit_transform(df)
+    train = df[:int(len(df) * train_size)]
+    test = df[int(len(df) * train_size):]
 
-X_train, y_train = [], []
-for i in range(60,len(train)):
-    X_train.append(scaled_data[i - 60:i])
-    y_train.append(scaled_data[i])
+    # converting dataset into x_train and y_train
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(df)
 
-X_train, y_train = np.array(X_train), np.array(y_train)
-X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], number_col))
+    X_train, y_train = [], []
+    for i in range(60, len(train)):
+        X_train.append(scaled_data[i - 60:i])
+        y_train.append(scaled_data[i])
 
-# model = create_model(X_train, y_train, number_col)
-model = load_model('LSTM_model')
+    X_train, y_train = np.array(X_train), np.array(y_train)
+    X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], number_col))
+    print('currently training: ', ticker)
+    model = create_model(X_train, y_train, number_col)
+    # model = load_model('LSTM_model')
+    closing_price = test_model(model, df, test, number_col)
+    # plt, scaled_data_prediction = predict_data(model, scaled_data, 3)
 
-inputs_df = df[len(df) - len(test) - 60:]
-inputs = df[len(df) - len(test) - 60:].values
-inputs = inputs.reshape(-1, number_col)
-inputs = scaler.transform(inputs)
-
-X_test, y_test = [], []
-for i in range(60,inputs.shape[0]):
-    X_test.append(inputs[i-60:i])
-    y_test.append(inputs[i])
-
-X_test, y_test = np.array(X_test), np.array(y_test)
-
-X_test = np.reshape(X_test, (X_test.shape[0],X_test.shape[1],number_col))
-closing_price = model.predict(X_test)
-closing_price = scaler.inverse_transform(closing_price)
-val_loss, val_acc = model.evaluate(X_test,y_test)
-print(val_loss, val_acc)
-
-test['Predictions'] = closing_price[:,0]
-plt.plot(train['Adj. Close'])
-plt.plot(test[['Adj. Close', 'Predictions']])
+    # plt.plot(test['Adj. Close'])
+    test['Predictions'] = closing_price[:, 0]
+    plt.plot(test[['Adj. Close', 'Predictions']])
+print(test.tail())
 print("done")
 plt.show()
