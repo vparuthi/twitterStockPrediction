@@ -3,6 +3,7 @@ import csv
 import numpy as np
 import pandas as pd
 import quandl as quandl
+import requests
 from keras.engine.saving import load_model
 
 quandl.ApiConfig.api_key = "y94CFqx58gLCyaY9hsRf"
@@ -17,6 +18,7 @@ from matplotlib import style
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import Dense, LSTM
+from bs4 import BeautifulSoup
 
 pd.options.mode.chained_assignment = None  # default='warn'
 style.use('ggplot')
@@ -36,7 +38,7 @@ def get_all_tweets(screen_name):
     new_tweets = api.user_timeline(screen_name=screen_name, count=200, include_rts=False)
     all_the_tweets.extend(new_tweets)
     oldest_tweet = all_the_tweets[-1].id - 1
-    while (len(new_tweets) > 0):
+    while len(new_tweets) > 0:
         # The max_id param will be used subsequently to prevent duplicates
         new_tweets = api.user_timeline(screen_name=screen_name,
                                        count=200, max_id=oldest_tweet, include_rts=False)
@@ -101,21 +103,20 @@ def create_df_csv(ticker):
 
 
 def read_df_csv(ticker):
-    df = pd.read_csv(ticker + 'Stock.csv')
-    if 'Date' in df.columns:
-        df = df[['Date', 'Adj. Close', 'HL_PCT', 'PCT_Change']]
-        df.index = df.Date
-        df.drop('Date', axis=1, inplace=True)
-    else:
-        df = df[['Adj. Close', 'HL_PCT', 'PCT_Change']]
+    df = pd.read_csv('nasdaq_tech_stock_csv/'+ticker)
+    if 'date' in df.columns:
+        df.index = df.date
+        df.drop('date', axis=1, inplace=True)
+    # else:
+    #     df = df[['Adj. Close', 'HL_PCT', 'PCT_Change']]
     return df
 
 
 def create_model(X_train, y_train, number_col):
-    if os.path.isfile('LSTM_model_multi_stock'):
-        model = load_model('LSTM_model_multi_stock')
+    if os.path.isfile('LSTM_model_multi_stock2'):
+        model = load_model('LSTM_model_multi_stock2')
         model.fit(X_train, y_train, epochs=2, batch_size=1, verbose=2)
-        model.save("LSTM_model_multi_stock")
+        model.save("LSTM_model_multi_stock2")
     else:
         model = Sequential()
         model.add(LSTM(units=50, return_sequences=True, input_shape=(X_train.shape[1], number_col)))
@@ -124,11 +125,11 @@ def create_model(X_train, y_train, number_col):
         model.add(Dense(number_col))
         model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
         model.fit(X_train, y_train, epochs=2, batch_size=1, verbose=2)
-        model.save("LSTM_model_multi_stock")
+        model.save("LSTM_model_multi_stock2")
     return model
 
 
-def test_model(model, df, test, number_col):
+def test_model(model, df, test, number_col, scaler):
     inputs = df[len(df) - len(test) - 60:].values
     inputs = inputs.reshape(-1, number_col)
     inputs = scaler.transform(inputs)
@@ -148,7 +149,7 @@ def test_model(model, df, test, number_col):
     return closing_price
 
 
-def predict_data(model, scaled_data, n):
+def predict_data(model, scaled_data, n, scaler, test):
     for i in range(n):
         predict_sample = []
         for j in range(n, 60 + n):
@@ -163,57 +164,80 @@ def predict_data(model, scaled_data, n):
         print(closing_price)
         plt.scatter(test.index.values[test.shape[0] - 1] + np.timedelta64(i + 1, 'D'), closing_price[0][0], s=100)
     return plt, scaled_data
+def get_tweets():
+    os.environ[
+        'GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/Veraj/PycharmProjects/twitterSideProject/googleAPICredentials.json'
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    text = "There is one kind of food I cannot stand: sashimi. Sashimi is raw fish. Many people like it. They love it in Japan, but I cannot even look at without feeling sick. First of all, it looks like it has not been cooked and that makes me think it might not be clean."
+
+    # screen_name = input("Enter the twitter handle of the person whose tweets you want to download: ")
+    screen_name = 'realDonaldTrump'
+    # get_all_tweets(screen_name)
+    # with open(screen_name + '_tweets.csv') as csv_file:
+    #
+    # df = pd.read_csv(screen_name+'_tweets.csv')
+    # # print(df)
+    # sentiment, entities = language_analysis(text)
+    # print_result(sentiment)
 
 
-## MAIN ##
-os.environ[
-    'GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/Veraj/PycharmProjects/twitterSideProject/googleAPICredentials.json'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-text = "There is one kind of food I cannot stand: sashimi. Sashimi is raw fish. Many people like it. They love it in Japan, but I cannot even look at without feeling sick. First of all, it looks like it has not been cooked and that makes me think it might not be clean."
+def main(number_col, train_size):
 
-# screen_name = input("Enter the twitter handle of the person whose tweets you want to download: ")
-screen_name = 'realDonaldTrump'
-# get_all_tweets(screen_name)
-# with open(screen_name + '_tweets.csv') as csv_file:
-#
-# df = pd.read_csv(screen_name+'_tweets.csv')
-# # print(df)
-# sentiment, entities = language_analysis(text)
-# print_result(sentiment)
 
-number_col = 3
+    for filename in os.listdir('/Users/Veraj/PycharmProjects/twitterSideProject/nasdaq_tech_stock_csv/'):
+        df = read_df_csv(filename)
+
+        train = df[:int(len(df) * train_size)]
+        test = df[int(len(df) * train_size):]
+
+        # converting dataset into x_train and y_train
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        scaled_data = scaler.fit_transform(df)
+
+        X_train, y_train = [], []
+        for i in range(60, len(train)):
+            X_train.append(scaled_data[i - 60:i])
+            y_train.append(scaled_data[i])
+
+        X_train, y_train = np.array(X_train), np.array(y_train)
+        X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], number_col))
+        print('currently training: ', filename)
+        model = create_model(X_train, y_train, number_col)
+        # model = load_model('LSTM_model')
+        closing_price = test_model(model, df, test, number_col, scaler)
+        # plt, scaled_data_prediction = predict_data(model, scaled_data, 3, scaler, test)
+
+        # plt.plot(test['Adj. Close'])
+        test['Predictions'] = closing_price[:, 0]
+        plt.plot(test[['Adj. Close', 'Predictions']])
+    print(test.tail())
+    print("done")
+    plt.show()
+
+number_col = 1
 train_size = 0.8
-ticker = 'AAPL'
+# ticker_list = pd.read_csv('nasdaq_tech_list.csv')
+# ticker_list = list(ticker_list['Symbol'])
+data = requests.get('https://seekingalpha.com/article/194270-top-25-nasdaq-stocks-ranked-by-market-cap')
+soup = BeautifulSoup(data.text, 'html.parser')
+span = soup.find('span', {'class':'table-responsive'})
+table = span.find('table')
 ticker_list = []
+for tr in table.find_all('tr'):
+    a_list = tr.find_all('a')
+    for a in a_list:
+        ticker_list.append(a.text.strip())
+
 # for ticker in ticker_list:
-#     df = create_df_csv(ticker)
+#     if not os.path.isfile('nasqad_tech_stock_csv/'+ ticker+'.csv'):
+#         print(ticker)
+#         ts = TimeSeries(key='L1WWTFAKE9UZLD89', output_format='pandas')
+#         data = ts.get_daily_adjusted(symbol=ticker, outputsize='full')
+#         data = data[0]
+#         data = data[['5. adjusted close']]
+#         data.columns = ['Adj. Close']
+#         data.to_csv('/Users/Veraj/PycharmProjects/twitterSideProject/nasqad_tech_stock_csv/' + ticker+'.csv')
 
-for ticker in ticker_list:
-    df = create_df_csv(ticker)
 
-    train = df[:int(len(df) * train_size)]
-    test = df[int(len(df) * train_size):]
+# main(number_col, train_size)
 
-    # converting dataset into x_train and y_train
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(df)
-
-    X_train, y_train = [], []
-    for i in range(60, len(train)):
-        X_train.append(scaled_data[i - 60:i])
-        y_train.append(scaled_data[i])
-
-    X_train, y_train = np.array(X_train), np.array(y_train)
-    X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], number_col))
-    print('currently training: ', ticker)
-    model = create_model(X_train, y_train, number_col)
-    # model = load_model('LSTM_model')
-    closing_price = test_model(model, df, test, number_col)
-    # plt, scaled_data_prediction = predict_data(model, scaled_data, 3)
-
-    # plt.plot(test['Adj. Close'])
-    test['Predictions'] = closing_price[:, 0]
-    plt.plot(test[['Adj. Close', 'Predictions']])
-print(test.tail())
-print("done")
-plt.show()
