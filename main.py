@@ -3,7 +3,6 @@ import csv
 import numpy as np
 import pandas as pd
 import quandl as quandl
-import requests
 from keras.engine.saving import load_model
 
 quandl.ApiConfig.api_key = "y94CFqx58gLCyaY9hsRf"
@@ -18,30 +17,29 @@ from matplotlib import style
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import Dense, LSTM
-from bs4 import BeautifulSoup
 
 pd.options.mode.chained_assignment = None  # default='warn'
 style.use('ggplot')
 
-consumer_key = 'nHv8Cx32VE2rXLhskSmR9JwDC'
-consumer_secret = '7pKXbHO1mxIy87qPn85CKkiTziwMsddbo9mu4aW7EBJ3kgUHvV'
-access_token = '805917270719557636-vZmznZ7QigDKLWzLAeNB3d6Y9BJ9nBx'
-access_secret = 'U2nQL9SYMDkDpKyfJqzDTgyEIsYdzMqkK1Xx2jnD5L682'
+#removed api keys
 
 auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
 auth.set_access_token(access_token, access_secret)
-api = tweepy.API(auth)
+twitter_api = tweepy.API(auth)
 
+os.environ[
+    'GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/Veraj/PycharmProjects/twitterSideProject/googleAPICredentials.json'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-def get_all_tweets(screen_name):
+def get_tweets_by_user(screen_name):
     all_the_tweets = []
-    new_tweets = api.user_timeline(screen_name=screen_name, count=200, include_rts=False)
+    new_tweets = twitter_api.user_timeline(screen_name=screen_name, count=200, include_rts=False)
     all_the_tweets.extend(new_tweets)
     oldest_tweet = all_the_tweets[-1].id - 1
     while len(new_tweets) > 0:
         # The max_id param will be used subsequently to prevent duplicates
-        new_tweets = api.user_timeline(screen_name=screen_name,
-                                       count=200, max_id=oldest_tweet, include_rts=False)
+        new_tweets = twitter_api.user_timeline(screen_name=screen_name,
+                                               count=200, max_id=oldest_tweet, include_rts=False)
 
         # save most recent tweets
         all_the_tweets.extend(new_tweets)
@@ -62,6 +60,23 @@ def get_all_tweets(screen_name):
         writer.writerows(outtweets)
     print('All Tweets Downloaded!')
 
+def get_tweets_by_serach():
+    max_tweets = 1000
+    # searched_tweets = []
+    # last_id = -1
+    # query = 'python'
+    # while len(searched_tweets) < max_tweets:
+    #     count = max_tweets - len(searched_tweets)
+    #     try:
+    #         new_tweets = twitter_api.search(q=query, count=count, max_id=str(last_id - 1))
+    #         if not new_tweets:
+    #             break
+    #         searched_tweets.extend(new_tweets)
+    #         last_id = new_tweets[-1].id
+    #     except tweepy.TweepError as e:
+    #         # depending on TweepError.code, one may want to retry or wait
+    #         # to keep things simple, we will give up on an error
+    #         break
 
 def language_analysis(text):
     client = language.LanguageServiceClient()
@@ -164,22 +179,6 @@ def predict_data(model, scaled_data, n, scaler, test):
         print(closing_price)
         plt.scatter(test.index.values[test.shape[0] - 1] + np.timedelta64(i + 1, 'D'), closing_price[0][0], s=100)
     return plt, scaled_data
-def get_tweets():
-    os.environ[
-        'GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/Veraj/PycharmProjects/twitterSideProject/googleAPICredentials.json'
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-    text = "There is one kind of food I cannot stand: sashimi. Sashimi is raw fish. Many people like it. They love it in Japan, but I cannot even look at without feeling sick. First of all, it looks like it has not been cooked and that makes me think it might not be clean."
-
-    # screen_name = input("Enter the twitter handle of the person whose tweets you want to download: ")
-    screen_name = 'realDonaldTrump'
-    # get_all_tweets(screen_name)
-    # with open(screen_name + '_tweets.csv') as csv_file:
-    #
-    # df = pd.read_csv(screen_name+'_tweets.csv')
-    # # print(df)
-    # sentiment, entities = language_analysis(text)
-    # print_result(sentiment)
-
 
 def main(number_col, train_size):
 
@@ -218,26 +217,41 @@ number_col = 1
 train_size = 0.8
 # ticker_list = pd.read_csv('nasdaq_tech_list.csv')
 # ticker_list = list(ticker_list['Symbol'])
-data = requests.get('https://seekingalpha.com/article/194270-top-25-nasdaq-stocks-ranked-by-market-cap')
-soup = BeautifulSoup(data.text, 'html.parser')
-span = soup.find('span', {'class':'table-responsive'})
-table = span.find('table')
-ticker_list = []
-for tr in table.find_all('tr'):
-    a_list = tr.find_all('a')
-    for a in a_list:
-        ticker_list.append(a.text.strip())
 
+# data = requests.get('https://seekingalpha.com/article/194270-top-25-nasdaq-stocks-ranked-by-market-cap')
+# soup = BeautifulSoup(data.text, 'html.parser')
+# span = soup.find('span', {'class':'table-responsive'})
+# table = span.find('table')
+# ticker_list = []
+# for tr in table.find_all('tr'):
+#     a_list = tr.find_all('a')
+#     for a in a_list:
+#         ticker_list.append(a.text.strip())
+#
 # for ticker in ticker_list:
-#     if not os.path.isfile('nasqad_tech_stock_csv/'+ ticker+'.csv'):
+#     if not os.path.isfile('nasdaq_tech_stock_csv/'+ ticker+'.csv'):
 #         print(ticker)
 #         ts = TimeSeries(key='L1WWTFAKE9UZLD89', output_format='pandas')
 #         data = ts.get_daily_adjusted(symbol=ticker, outputsize='full')
 #         data = data[0]
 #         data = data[['5. adjusted close']]
 #         data.columns = ['Adj. Close']
-#         data.to_csv('/Users/Veraj/PycharmProjects/twitterSideProject/nasqad_tech_stock_csv/' + ticker+'.csv')
+#         data.to_csv('/Users/Veraj/PycharmProjects/twitterSideProject/nasdaq_tech_stock_csv/' + ticker+'.csv')
 
 
-# main(number_col, train_size)
+main(number_col, train_size)
+
+
+text = "There is one kind of food I cannot stand: sashimi. Sashimi is raw fish. Many people like it. They love it in Japan, but I cannot even look at without feeling sick. First of all, it looks like it has not been cooked and that makes me think it might not be clean."
+
+# screen_name = input("Enter the twitter handle of the person whose tweets you want to download: ")
+screen_name = 'realDonaldTrump'
+# get_tweets_by_user(screen_name)
+# with open(screen_name + '_tweets.csv') as csv_file:
+#
+# df = pd.read_csv(screen_name+'_tweets.csv')
+# # print(df)
+# sentiment, entities = language_analysis(text)
+# print_result(sentiment)
+# get_tweets_by_serach()
 
